@@ -1,4 +1,4 @@
-# easydl
+# Easydl
 
 ```text
   ███████╗  █████╗  ███████╗ ██╗   ██╗ ██████╗  ██╗     
@@ -10,7 +10,7 @@
 ```
 
 <p align="center">
-  <b>A friendly, high-performance, cross-platform media downloader & library manager.</b><br>
+  <b>A friendly, high-performance, Vibe-Coded, cross-platform media downloader & library manager.</b><br>
   <i>Powered by <code>yt-dlp</code>, <code>ffmpeg</code>, and <code>rich</code>.</i>
 </p>
 
@@ -134,7 +134,7 @@ This launches the full terminal UI where you can choose actions with single key 
 
 ```bash
 # Smart auto-prompt for any URL
-easydl "https://youtu.be/dQw4w9WgXcQ"
+easydl "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 # Download audio track as FLAC or MP3
 easydl audio -f flac "https://youtu.be/dQw4w9WgXcQ"
