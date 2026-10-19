@@ -28,7 +28,7 @@
 - 🎨 **Sleek Interactive TUI**: Beautiful modern visual interface powered by Rich with dynamic gradient banners and live badges.
 - 🎵 **Audiophile-Grade Audio Downloads**: One-click extraction to MP3 (320kbps), bit-perfect FLAC, OPUS, M4A, or uncompressed WAV.
 - 🎬 **Crisp Video Downloads**: Easy resolution selector supporting 4K (2160p), 2K (1440p), 1080p Full HD, 720p, or Best Available with automated stream merging.
-- 🟢 **Native Spotify Support**: Paste any Spotify track, album, or playlist URL—`easydl` automatically extracts metadata and fetches high-quality audio.
+- 🟢 **Native Spicetify Support**: Paste any Spotify track, album, or playlist URL—`easydl` automatically extracts metadata and fetches high-quality audio.
 - 📋 **Smart Clipboard Detection**: Automatically detects YouTube, Spotify, and other media URLs copied to your clipboard on launch across Linux (Wayland & X11), macOS, and Windows.
 - 🔁 **Incremental Playlist Sync**: Keeps track of downloaded songs in an archive file so repeated sync runs only download newly added items.
 - 🔍 **Interactive Media Library**: Search and launch your downloaded music and videos instantly using `fzf` or the built-in search picker.
