@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "easydl"
+version = "2.2.0"
+description = "A friendly, cross-platform media downloader & library manager powered by yt-dlp, rich, and ffmpeg."
+readme = "README.md"
+authors = [{ name = "easydl team" }]
+license = { text = "MIT" }
+requires-python = ">=3.8"
+keywords = ["yt-dlp", "youtube", "spotify", "downloader", "media", "audio", "video", "cli", "tui"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "rich>=13.0.0",
+    "yt-dlp>=2024.0.0",
+]
+
+[project.scripts]
+easydl = "easydl.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/kekobade/easydl"
+Repository = "https://github.com/kekobade/easydl"
+"Bug Tracker" = "https://github.com/kekobade/easydl/issues"

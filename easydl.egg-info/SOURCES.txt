@@ -1,0 +1,13 @@
+LICENSE
+README.md
+pyproject.toml
+setup.py
+easydl/__init__.py
+easydl/__main__.py
+easydl/cli.py
+easydl.egg-info/PKG-INFO
+easydl.egg-info/SOURCES.txt
+easydl.egg-info/dependency_links.txt
+easydl.egg-info/entry_points.txt
+easydl.egg-info/requires.txt
+easydl.egg-info/top_level.txt
