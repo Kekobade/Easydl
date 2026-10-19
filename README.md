@@ -55,7 +55,7 @@ Choose your operating system below for 1-click or quick installation instruction
 #### Automated 1-Click Install:
 Clone this repository and run the installer:
 ```bash
-git clone https://github.com/your-username/easydl.git
+git clone https://github.com/kekobade/easydl.git
 cd easydl
 chmod +x install.sh
 ./install.sh
@@ -79,7 +79,7 @@ chmod +x install.sh
 
 #### Automated 1-Click Install:
 ```bash
-git clone https://github.com/your-username/easydl.git
+git clone https://github.com/kekobade/easydl.git
 cd easydl
 chmod +x install.sh
 ./install.sh
@@ -188,7 +188,7 @@ You can adjust these settings directly inside `easydl` by pressing **`7`** (**Se
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check the [issues page](https://github.com/your-username/easydl/issues).
+Feel free to check the [issues page](https://github.com/kekobade/easydl/issues).
 
 ---
 
