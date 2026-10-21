@@ -21,6 +21,9 @@
   <img src="https://img.shields.io/badge/powered%20by-yt--dlp-ffd200?style=for-the-badge&logoColor=black" alt="yt-dlp" />
 </p>
 
+> [!CAUTION]
+> **STILL IN BETA FOR DOWNLOADING SPOTIFY SONGS**
+
 ---
 
 ## ✨ Features
