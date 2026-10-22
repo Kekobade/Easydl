@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easydl"
-version = "2.2.0"
+version = "2.3.0"
 description = "A friendly, cross-platform media downloader & library manager powered by yt-dlp, rich, and ffmpeg."
 readme = "README.md"
 authors = [{ name = "easydl team" }]
 license = { text = "MIT" }
 requires-python = ">=3.8"
-keywords = ["yt-dlp", "youtube", "spotify", "downloader", "media", "audio", "video", "cli", "tui"]
+keywords = ["yt-dlp", "youtube", "spotify", "apple-music", "soundcloud", "ytmusic", "downloader", "media", "audio", "video", "cli", "tui"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",

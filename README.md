@@ -1,4 +1,4 @@
-# Easydl
+# easydl
 
 ```text
   ███████╗  █████╗  ███████╗ ██╗   ██╗ ██████╗  ██╗     
@@ -10,7 +10,7 @@
 ```
 
 <p align="center">
-  <b>A friendly, high-performance, Vibe-Coded, cross-platform media downloader & library manager.</b><br>
+  <b>A friendly, high-performance, cross-platform media downloader & library manager.</b><br>
   <i>Powered by <code>yt-dlp</code>, <code>ffmpeg</code>, and <code>rich</code>.</i>
 </p>
 
@@ -21,19 +21,20 @@
   <img src="https://img.shields.io/badge/powered%20by-yt--dlp-ffd200?style=for-the-badge&logoColor=black" alt="yt-dlp" />
 </p>
 
-> [!CAUTION]
-> **STILL IN BETA FOR DOWNLOADING SPOTIFY SONGS**
-
 ---
 
 ## ✨ Features
 
 - 🎨 **Sleek Interactive TUI**: Beautiful modern visual interface powered by Rich with dynamic gradient banners and live badges.
-- 🎵 **Audiophile-Grade Audio Downloads**: One-click extraction to MP3 (320kbps), bit-perfect FLAC, OPUS, M4A, or uncompressed WAV.
+- 🎵 **Multi-Platform Music Suite**: First-class support for **Spotify**, **Apple Music**, **YouTube Music**, and **SoundCloud**.
+- 📁 **Automated Playlist & Album Folders**: Downloading any playlist or album (from Spotify, Apple Music, YouTube Music, SoundCloud, or YouTube) automatically creates a clean, dedicated subfolder named after the playlist!
+- 🟢 **Fixed & Enhanced Spotify Support**: Robust metadata extraction with automatic typo recovery (resolves `0` vs `O` errors) and strict verification so you never get mismatched songs.
+- 🍎 **Native Apple Music Support**: Download songs, albums, and curated playlists directly from Apple Music links with full tag preservation.
+- 🔴 **YouTube Music & 🟠 SoundCloud**: Full native extraction of tracks, playlists, sets, and albums.
+- 🎶 **Audiophile-Grade Formats**: One-click extraction to MP3 (320kbps), bit-perfect FLAC, OPUS, M4A, or uncompressed WAV with embedded album artwork and metadata tags.
 - 🎬 **Crisp Video Downloads**: Easy resolution selector supporting 4K (2160p), 2K (1440p), 1080p Full HD, 720p, or Best Available with automated stream merging.
-- 🟢 **Native Spicetify Support**: Paste any Spotify track, album, or playlist URL—`easydl` automatically extracts metadata and fetches high-quality audio.
-- 📋 **Smart Clipboard Detection**: Automatically detects YouTube, Spotify, and other media URLs copied to your clipboard on launch across Linux (Wayland & X11), macOS, and Windows.
-- 🔁 **Incremental Playlist Sync**: Keeps track of downloaded songs in an archive file so repeated sync runs only download newly added items.
+- 📋 **Smart Clipboard Detection**: Automatically detects URLs copied to your clipboard on launch across Linux (Wayland & X11), macOS, and Windows.
+- 🔁 **Incremental Playlist Sync**: Keeps track of downloaded songs in `.easydl-archive.txt` so repeated sync runs only download newly added items without re-downloading.
 - 🔍 **Interactive Media Library**: Search and launch your downloaded music and videos instantly using `fzf` or the built-in search picker.
 - 🌍 **100% Cross-Platform**: Native notifications and file manager integrations for **Linux** (`notify-send`, `xdg-open`), **macOS** (Notification Center, Finder), and **Windows** (System Tray balloons, File Explorer).
 
@@ -58,7 +59,7 @@ Choose your operating system below for 1-click or quick installation instruction
 #### Automated 1-Click Install:
 Clone this repository and run the installer:
 ```bash
-git clone https://github.com/kekobade/easydl.git
+git clone https://github.com/your-username/easydl.git
 cd easydl
 chmod +x install.sh
 ./install.sh
@@ -82,7 +83,7 @@ chmod +x install.sh
 
 #### Automated 1-Click Install:
 ```bash
-git clone https://github.com/kekobade/easydl.git
+git clone https://github.com/your-username/easydl.git
 cd easydl
 chmod +x install.sh
 ./install.sh
@@ -137,7 +138,19 @@ This launches the full terminal UI where you can choose actions with single key 
 
 ```bash
 # Smart auto-prompt for any URL
-easydl "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+easydl "https://youtu.be/dQw4w9WgXcQ"
+
+# Download Spotify track, album, or playlist (auto-creates playlist folder)
+easydl spotify "https://open.spotify.com/playlist/37i9dQZF1DZ06evO1duNex"
+
+# Download Apple Music song, album, or playlist (auto-creates playlist folder)
+easydl apple "https://music.apple.com/us/album/anti-deluxe/1440933849"
+
+# Download YouTube Music track or album
+easydl ytmusic "https://music.youtube.com/playlist?list=..."
+
+# Download SoundCloud track or set
+easydl soundcloud "https://soundcloud.com/artist/sets/..."
 
 # Download audio track as FLAC or MP3
 easydl audio -f flac "https://youtu.be/dQw4w9WgXcQ"
@@ -145,11 +158,8 @@ easydl audio -f flac "https://youtu.be/dQw4w9WgXcQ"
 # Download video capped at 1080p
 easydl video -q 1080 "https://youtu.be/dQw4w9WgXcQ"
 
-# Download Spotify track, album, or playlist
-easydl spotify "https://open.spotify.com/album/46SYTfUIAxc65t2TFZp1fk"
-
-# Sync a playlist incrementally into a named folder
-easydl sync "https://youtube.com/playlist?list=..." lofi-beats
+# Sync a playlist incrementally into an auto-named folder (or custom folder)
+easydl sync "https://youtube.com/playlist?list=..."
 
 # Instantly download media URL currently in clipboard
 easydl clipboard
@@ -191,7 +201,7 @@ You can adjust these settings directly inside `easydl` by pressing **`7`** (**Se
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check the [issues page](https://github.com/kekobade/easydl/issues).
+Feel free to check the [issues page](https://github.com/your-username/easydl/issues).
 
 ---
 

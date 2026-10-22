@@ -20,6 +20,8 @@ import json
 import base64
 import shutil
 import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 try:
@@ -34,7 +36,7 @@ except ImportError:
     print("Error: 'rich' library is required. Install with: pip install rich")
     sys.exit(1)
 
-VERSION = "2.2.0"
+VERSION = "2.3.0"
 
 # ---------- Cross-Platform Paths ----------
 def get_config_dir():
@@ -257,104 +259,180 @@ def check_dependencies():
                 console.print("[yellow]Quick Linux fix: install yt-dlp and ffmpeg using your package manager.[/yellow]")
             sys.exit(1)
 
+# ---------- Music Platforms & Sanitization Helpers ----------
+def sanitize_folder_name(name):
+    """Sanitize playlist/album name for safe folder creation across OSes."""
+    clean = re.sub(r'[\\/*?:"<>|]', "_", str(name)).strip()
+    clean = re.sub(r'^[. ]+', '', clean)
+    clean = clean.strip()
+    return clean or "Playlist"
+
+PLATFORM_META = {
+    "spotify": {"name": "Spotify", "color": "#1db954", "icon": "🟢"},
+    "apple_music": {"name": "Apple Music", "color": "#fc3c44", "icon": "🍎"},
+    "ytmusic": {"name": "YouTube Music", "color": "#ff0000", "icon": "🔴"},
+    "youtube": {"name": "YouTube", "color": "#ff0000", "icon": "▶️"},
+    "soundcloud": {"name": "SoundCloud", "color": "#ff5500", "icon": "🟠"},
+    "bandcamp": {"name": "Bandcamp", "color": "#629aa9", "icon": "🟣"},
+    "generic": {"name": "Web Media", "color": "#00f2fe", "icon": "🌐"},
+}
+
+def detect_platform(url):
+    s = str(url).lower()
+    if is_spotify_url(s):
+        return "spotify"
+    elif is_apple_music_url(s):
+        return "apple_music"
+    elif "music.youtube.com" in s:
+        return "ytmusic"
+    elif "youtube.com" in s or "youtu.be" in s:
+        return "youtube"
+    elif "soundcloud.com" in s:
+        return "soundcloud"
+    elif "bandcamp.com" in s:
+        return "bandcamp"
+    return "generic"
+
 # ---------- Spotify Support ----------
 def is_spotify_url(url):
     return bool(re.search(r"(open\.spotify\.com/(track|album|playlist|artist)/|spotify:(track|album|playlist|artist):)", str(url)))
 
 def parse_spotify(url):
-    """Extract tracks and metadata from any Spotify link using public web player metadata."""
+    """Extract tracks and metadata from any Spotify link using public embed metadata."""
     console.print("[dim]Parsing Spotify metadata...[/dim]")
-    page = ""
-    try:
-        import urllib.request
+    m = re.search(r"(track|album|playlist|artist)[/:]([a-zA-Z0-9]+)", str(url))
+    if not m:
+        return None, "Invalid Spotify URL format."
+    kind, item_id = m.group(1), m.group(2)
+
+    def fetch_embed(c_id):
+        embed_url = f"https://open.spotify.com/embed/{kind}/{c_id}"
         req = urllib.request.Request(
-            url,
+            embed_url,
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
         )
-        with urllib.request.urlopen(req, timeout=12) as response:
-            page = response.read().decode("utf-8", errors="ignore")
-    except Exception:
-        if shutil.which("curl"):
-            try:
-                proc = subprocess.run(
-                    ["curl", "-s", "-L", url, "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)"],
-                    capture_output=True, text=True, timeout=12
-                )
-                page = proc.stdout
-            except Exception as e:
-                console.print(f"[red]Network error connecting to Spotify: {e}[/red]")
-                return None
-        else:
-            console.print("[red]Could not connect to Spotify. Check internet connection.[/red]")
-            return None
+        try:
+            with urllib.request.urlopen(req, timeout=12) as response:
+                return response.read().decode("utf-8", errors="ignore"), 200
+        except urllib.error.HTTPError as e:
+            return "", e.code
+        except Exception:
+            if shutil.which("curl"):
+                try:
+                    proc = subprocess.run(
+                        ["curl", "-s", "-L", embed_url, "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)"],
+                        capture_output=True, text=True, timeout=12
+                    )
+                    return proc.stdout, 200 if proc.stdout else 500
+                except Exception:
+                    pass
+            return "", 500
 
-    m = re.search(r'<script\s+id=[\"|\']initialState[\"|\'][^>]*>([^<]+)</script>', page)
-    if not m:
-        title_m = re.search(r'<meta\s+property=\"og:title\"\s+content=\"([^\"]+)\"', page)
-        desc_m = re.search(r'<meta\s+property=\"og:description\"\s+content=\"([^\"]+)\"', page)
-        raw_title = title_m.group(1) if title_m else "Unknown"
-        clean_title = re.sub(r"\s*-\s*(Song|Album|Playlist|track).*", "", raw_title, flags=re.I).strip()
-        artist = desc_m.group(1).split("·")[0].strip() if desc_m else ""
-        return {
-            "type": "track",
-            "title": clean_title,
-            "artist": artist,
-            "tracks": [{"title": clean_title, "artist": artist, "album": clean_title}]
-        }
+    def is_valid_embed(content, status_code):
+        if status_code != 200 or not content:
+            return False
+        if '"status":404' in content or '"status": 404' in content or '"status":500' in content or '"status": 500' in content:
+            return False
+        if "Page not found" in content:
+            return False
+        try:
+            m_chk = re.search(r"<script id=\"__NEXT_DATA__\" type=\"application/json\">([^<]+)</script>", content)
+            if not m_chk:
+                return False
+            d_chk = json.loads(m_chk.group(1))
+            ent_chk = d_chk.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {})
+            return bool(ent_chk and (ent_chk.get("title") or ent_chk.get("name")))
+        except Exception:
+            return False
+
+    html, code = fetch_embed(item_id)
+    # Check for typo (e.g. 0 vs O, 1 vs l/I) if not valid
+    if not is_valid_embed(html, code):
+        corrected = False
+        probes = 0
+        for idx_ch, ch in enumerate(item_id):
+            if probes >= 4:
+                break
+            replacements = []
+            if ch in ["0", "O"]:
+                replacements.append("O" if ch == "0" else "0")
+            elif ch in ["1", "l", "I"]:
+                replacements.extend([r for r in ["1", "l", "I"] if r != ch])
+            for r_ch in replacements:
+                if probes >= 4:
+                    break
+                probes += 1
+                cand_id = item_id[:idx_ch] + r_ch + item_id[idx_ch+1:]
+                cand_html, cand_code = fetch_embed(cand_id)
+                if is_valid_embed(cand_html, cand_code):
+                    html, code, item_id = cand_html, cand_code, cand_id
+                    corrected = True
+                    console.print(f"[bold green]✔ Auto-corrected URL ID typo ({ch} ➜ {r_ch}): {cand_id}[/bold green]")
+                    break
+            if corrected:
+                break
+
+    if not is_valid_embed(html, code):
+        return None, "Spotify item not found (HTTP 404). The playlist or track may be private or removed. Check for typos (e.g., 0 vs O)."
+
+    if not html:
+        return None, f"Failed to retrieve Spotify metadata (HTTP {code}). Check your network connection."
+
+    m_json = re.search(r"<script id=\"__NEXT_DATA__\" type=\"application/json\">([^<]+)</script>", html)
+    if not m_json:
+        return None, "Could not locate structured metadata in Spotify embed."
 
     try:
-        data = json.loads(base64.b64decode(m.group(1)).decode("utf-8", errors="ignore"))
-        items = data.get("entities", {}).get("items", {})
+        data = json.loads(m_json.group(1))
+        page_props = data.get("props", {}).get("pageProps", {})
+        if page_props.get("status") == 404:
+            return None, "Spotify item does not exist or is set to private (HTTP 404)."
+        entity = page_props.get("state", {}).get("data", {}).get("entity", {})
     except Exception as e:
-        console.print(f"[red]Error parsing Spotify JSON: {e}[/red]")
-        return None
+        return None, f"Error decoding Spotify JSON data: {e}"
 
-    collection_type = "track"
-    collection_title = ""
-    collection_artist = ""
+    if not entity:
+        return None, "Spotify entity data is empty or invalid."
+
+    entity_type = entity.get("type", kind)
+    title = entity.get("title") or entity.get("name") or "Unknown"
+    subtitle = entity.get("subtitle") or ""
+
+    artists_list = [a.get("name", "") for a in entity.get("artists", []) if a.get("name")]
+    entity_artist = ", ".join(artists_list) or subtitle or "Various Artists"
+
     tracks = []
-
-    for k, v in items.items():
-        if ":album:" in k or ":playlist:" in k:
-            collection_type = "album" if ":album:" in k else "playlist"
-            collection_title = v.get("name", "Spotify Collection")
-            artist_list = [a.get("profile", {}).get("name", "") or a.get("name", "") for a in v.get("artists", {}).get("items", []) or v.get("artists", [])]
-            collection_artist = ", ".join([a for a in artist_list if a]) or "Various Artists"
-
-            tracks_data = v.get("tracksV2", {}) or v.get("tracks", {})
-            it_list = tracks_data.get("items", [])
-            for it in it_list:
-                t = it.get("track", it)
-                t_name = t.get("name")
-                if not t_name:
-                    continue
-                t_artists = [a.get("profile", {}).get("name", "") or a.get("name", "") for a in t.get("artists", {}).get("items", []) or t.get("artists", [])]
-                art_str = ", ".join([a for a in t_artists if a]) or collection_artist
-                tracks.append({"title": t_name, "artist": art_str, "album": collection_title})
-            break
-
-        elif ":track:" in k:
-            collection_type = "track"
-            collection_title = v.get("name", "Unknown Track")
-            art_list = [a.get("profile", {}).get("name", "") or a.get("name", "") for a in v.get("artists", {}).get("items", []) or v.get("artists", [])]
-            collection_artist = ", ".join([a for a in art_list if a]) or "Unknown Artist"
-            alb = v.get("albumOfTrack", {}).get("name", collection_title)
-            tracks.append({"title": collection_title, "artist": collection_artist, "album": alb})
-            break
+    raw_tracklist = entity.get("trackList", [])
+    if raw_tracklist:
+        for t in raw_tracklist:
+            t_title = t.get("title") or t.get("name")
+            if not t_title:
+                continue
+            t_artist = t.get("subtitle") or entity_artist
+            t_album = title if entity_type == "album" else ""
+            tracks.append({
+                "title": t_title,
+                "artist": t_artist,
+                "album": t_album,
+                "duration_ms": t.get("duration", 0)
+            })
+    elif entity_type == "track":
+        tracks.append({
+            "title": title,
+            "artist": entity_artist,
+            "album": entity.get("album", {}).get("name", "") or title,
+            "duration_ms": entity.get("duration", 0)
+        })
 
     if not tracks:
-        title_m = re.search(r'<meta\s+property=\"og:title\"\s+content=\"([^\"]+)\"', page)
-        raw_title = title_m.group(1) if title_m else "Track"
-        clean_title = re.sub(r"\s*-\s*(Song|Album|Playlist|track).*", "", raw_title, flags=re.I).strip()
-        tracks.append({"title": clean_title, "artist": "", "album": ""})
-        collection_title = clean_title
+        return None, "No playable tracks found in Spotify collection."
 
     return {
-        "type": collection_type,
-        "title": collection_title,
-        "artist": collection_artist,
+        "type": entity_type,
+        "title": title,
+        "artist": entity_artist,
         "tracks": tracks
-    }
+    }, None
 
 def download_spotify(url, fmt=None, out_dir=None, config=None):
     if not config:
@@ -362,9 +440,9 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
     fmt = fmt or config.get("default_audio_fmt", "mp3")
     base_out = Path(out_dir or config.get("audio_dir", Path.home() / "Music" / "easydl"))
 
-    meta = parse_spotify(url)
-    if not meta or not meta["tracks"]:
-        console.print("[bold red]Could not retrieve Spotify track details. Check the link.[/bold red]")
+    meta, err = parse_spotify(url)
+    if not meta or not meta.get("tracks"):
+        console.print(f"[bold red]Could not retrieve Spotify track details: {err or 'Unknown error'}[/bold red]")
         return 1
 
     tracks = meta["tracks"]
@@ -380,9 +458,10 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
     console.print(info_card)
 
     dest_folder = base_out
-    if meta["type"] in ["album", "playlist"]:
-        safe_name = re.sub(r'[\\/*?:"<>|]', "_", meta["title"]).strip()
+    if meta["type"] in ["album", "playlist"] or total > 1:
+        safe_name = sanitize_folder_name(meta["title"])
         dest_folder = base_out / safe_name
+        console.print(f"  [dim]📁 Dedicated folder:[/] [bold cyan]{dest_folder}[/]")
     dest_folder.mkdir(parents=True, exist_ok=True)
 
     archive_file = dest_folder / ".easydl-archive.txt"
@@ -405,7 +484,7 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
             continue
 
         console.print(f"\n[bold #00f2fe]➜ {track_tag} Fetching:[/] [bold white]{t['title']}[/] [dim]by {t['artist']}[/]")
-        query = f"ytsearch1:{t['artist']} - {t['title']} audio"
+        query = f"ytsearch1:{t['artist']} - {t['title']} audio" if t.get('artist') else f"ytsearch1:{t['title']} audio"
 
         out_template = str(dest_folder / f"{idx:02d} - %(title)s.%(ext)s") if total > 1 else str(dest_folder / "%(title)s.%(ext)s")
 
@@ -417,9 +496,9 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
             "--audio-quality", "0",
             "--no-playlist",
             "-o", out_template,
-            query
         ]
         cmd.extend(build_base_ytdlp_args(config))
+        cmd.append(query)
 
         ret = subprocess.run(cmd)
         if ret.returncode == 0:
@@ -446,6 +525,245 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
         console.print("[bold red]Failed to download tracks from Spotify collection.[/bold red]")
         return 1
 
+# ---------- Apple Music Support ----------
+def is_apple_music_url(url):
+    return bool(re.search(r"(music|itunes)\.apple\.com/", str(url)))
+
+def parse_apple_music(url):
+    """Extract tracks and metadata from Apple Music link."""
+    console.print("[dim]Parsing Apple Music metadata...[/dim]")
+    url_clean = str(url).strip()
+    req = urllib.request.Request(
+        url_clean,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    )
+    html = ""
+    try:
+        with urllib.request.urlopen(req, timeout=12) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+    except urllib.error.HTTPError as e:
+        return None, f"Apple Music returned HTTP {e.code}: {e.reason}"
+    except Exception as e:
+        if shutil.which("curl"):
+            try:
+                proc = subprocess.run(
+                    ["curl", "-s", "-L", url_clean, "-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)"],
+                    capture_output=True, text=True, timeout=12
+                )
+                html = proc.stdout
+            except Exception:
+                return None, f"Failed to connect to Apple Music: {e}"
+        else:
+            return None, f"Failed to connect to Apple Music: {e}"
+
+    if not html:
+        return None, "Empty response from Apple Music."
+
+    # Check for single song query (?i=12345)
+    song_id_match = re.search(r"[?&]i=(\d+)", url_clean)
+    target_track_id = song_id_match.group(1) if song_id_match else None
+    is_song_url = "/song/" in url_clean or bool(target_track_id)
+
+    # 1. Parse serialized-server-data (best for playlists and albums)
+    m_server = re.search(r"<script type=\"application/json\" id=\"serialized-server-data\">([^<]+)</script>", html)
+    if m_server:
+        try:
+            s_data = json.loads(m_server.group(1))
+            items_arr = s_data.get("data", []) if isinstance(s_data, dict) else s_data
+            if items_arr and isinstance(items_arr, list):
+                main_item = items_arr[0]
+                d = main_item.get("data", {})
+                
+                collection_title = ""
+                seo_title = d.get("seoData", {}).get("pageTitle", "")
+                if seo_title:
+                    collection_title = re.sub(r"\s*-\s*(Playlist|Album|Song).*", "", seo_title, flags=re.I).strip()
+                    collection_title = collection_title.lstrip("\u200e").strip()
+
+                tracks = []
+                sections = d.get("sections", [])
+                for sec in sections:
+                    for itm in sec.get("items", []):
+                        t_id = str(itm.get("id", ""))
+                        if "track-lockup" in t_id or "song" in t_id or (itm.get("title") and itm.get("subtitleLinks")):
+                            t_title = itm.get("title", "").strip()
+                            t_artists = [a.get("title") for a in itm.get("subtitleLinks", []) if a.get("title")]
+                            t_artist = ", ".join(t_artists)
+                            t_album = ""
+                            if itm.get("tertiaryLinks"):
+                                t_album = itm["tertiaryLinks"][0].get("title", "")
+                            
+                            nums = re.findall(r"\d{6,}", t_id)
+                            item_adam_id = nums[-1] if nums else None
+                            if target_track_id and item_adam_id and target_track_id != item_adam_id:
+                                continue
+
+                            if t_title:
+                                tracks.append({
+                                    "title": t_title,
+                                    "artist": t_artist,
+                                    "album": t_album or collection_title
+                                })
+                
+                if tracks:
+                    if is_song_url and len(tracks) >= 1:
+                        chosen = tracks[0]
+                        return {
+                            "type": "track",
+                            "title": chosen["title"],
+                            "artist": chosen["artist"],
+                            "tracks": [chosen]
+                        }, None
+
+                    c_type = "album" if "album" in url_clean.lower() else "playlist"
+                    c_artist = tracks[0]["artist"] if c_type == "album" else "Various Artists"
+                    return {
+                        "type": c_type,
+                        "title": collection_title or "Apple Music Collection",
+                        "artist": c_artist,
+                        "tracks": tracks
+                    }, None
+        except Exception:
+            pass
+
+    # 2. Schema JSON-LD Fallback
+    m_schema = re.search(r"<script id=\"?schema:[^\">]+\"? type=\"application/ld\+json\">([^<]+)</script>", html)
+    if m_schema:
+        try:
+            sch = json.loads(m_schema.group(1))
+            stype = sch.get("@type", "")
+            sname = sch.get("name", "").lstrip("\u200e").strip()
+            by_artist = sch.get("byArtist", [])
+            sartist = by_artist[0].get("name", "") if by_artist and isinstance(by_artist, list) else ""
+            
+            raw_tracks = sch.get("tracks", [])
+            if raw_tracks:
+                tracks = []
+                for rt in raw_tracks:
+                    rt_name = rt.get("name", "")
+                    if rt_name:
+                        tracks.append({
+                            "title": rt_name,
+                            "artist": sartist,
+                            "album": sname
+                        })
+                return {
+                    "type": "album" if "Album" in stype else "playlist",
+                    "title": sname,
+                    "artist": sartist,
+                    "tracks": tracks
+                }, None
+            elif stype in ["MusicRecording", "MusicComposition"] or is_song_url:
+                og_t = re.search(r"<meta property=\"og:title\" content=\"([^\"]+)\"", html)
+                title_cand = sname
+                artist_cand = sartist
+                if og_t:
+                    og_match = re.match(r"(.*?)\s+by\s+(.*?)\s+on\s+Apple\s+Music", og_t.group(1), re.I)
+                    if og_match:
+                        title_cand = og_match.group(1).strip()
+                        artist_cand = og_match.group(2).strip()
+                return {
+                    "type": "track",
+                    "title": title_cand,
+                    "artist": artist_cand,
+                    "tracks": [{"title": title_cand, "artist": artist_cand, "album": ""}]
+                }, None
+        except Exception:
+            pass
+
+    return None, "Could not extract tracks from Apple Music link. Please check if link is valid and public."
+
+def download_apple_music(url, fmt=None, out_dir=None, config=None):
+    if not config:
+        config = load_config()
+    fmt = fmt or config.get("default_audio_fmt", "mp3")
+    base_out = Path(out_dir or config.get("audio_dir", Path.home() / "Music" / "easydl"))
+
+    meta, err = parse_apple_music(url)
+    if not meta or not meta.get("tracks"):
+        console.print(f"[bold red]Could not retrieve Apple Music tracks: {err or 'Unknown error'}[/bold red]")
+        return 1
+
+    tracks = meta["tracks"]
+    total = len(tracks)
+
+    info_card = Panel(
+        f"[bold #fc3c44]Apple Music {meta['type'].upper()}:[/] [bold white]{meta['title']}[/]\n"
+        f"[dim]Artist:[/] [cyan]{meta['artist'] or 'Various'}[/]  │  [dim]Total Tracks:[/] [yellow]{total}[/]",
+        border_style="#fc3c44",
+        box=box.ROUNDED,
+        title="[bold #fc3c44]🍎 Apple Music Media Detected[/]"
+    )
+    console.print(info_card)
+
+    dest_folder = base_out
+    if meta["type"] in ["album", "playlist"] or total > 1:
+        safe_name = sanitize_folder_name(meta["title"])
+        dest_folder = base_out / safe_name
+        console.print(f"  [dim]📁 Dedicated folder:[/] [bold cyan]{dest_folder}[/]")
+    dest_folder.mkdir(parents=True, exist_ok=True)
+
+    archive_file = dest_folder / ".easydl-archive.txt"
+    downloaded_set = set()
+    if archive_file.exists():
+        try:
+            with open(archive_file, "r", encoding="utf-8") as f:
+                downloaded_set = {line.strip() for line in f if line.strip()}
+        except Exception:
+            pass
+
+    success_count = 0
+    for idx, t in enumerate(tracks, start=1):
+        track_key = f"{t['artist']} - {t['title']}"
+        track_tag = f"[{idx}/{total}]"
+
+        if track_key in downloaded_set:
+            console.print(f"  {track_tag} [dim]Already downloaded, skipping:[/] [white]{track_key}[/]")
+            success_count += 1
+            continue
+
+        console.print(f"\n[bold #00f2fe]➜ {track_tag} Fetching:[/] [bold white]{t['title']}[/] [dim]by {t['artist']}[/]")
+        query = f"ytsearch1:{t['artist']} - {t['title']} audio" if t.get('artist') else f"ytsearch1:{t['title']} audio"
+
+        out_template = str(dest_folder / f"{idx:02d} - %(title)s.%(ext)s") if total > 1 else str(dest_folder / "%(title)s.%(ext)s")
+
+        cmd = [
+            "yt-dlp",
+            "-f", "bestaudio/best",
+            "--extract-audio",
+            "--audio-format", fmt,
+            "--audio-quality", "0",
+            "--no-playlist",
+            "-o", out_template,
+        ]
+        cmd.extend(build_base_ytdlp_args(config))
+        cmd.append(query)
+
+        ret = subprocess.run(cmd)
+        if ret.returncode == 0:
+            success_count += 1
+            try:
+                with open(archive_file, "a", encoding="utf-8") as f:
+                    f.write(f"{track_key}\n")
+            except Exception:
+                pass
+        else:
+            console.print(f"  [red]Failed to fetch track:[/] {t['title']}")
+
+    if success_count > 0:
+        done_card = Panel(
+            f"[bold #00e676]✔ Successfully fetched {success_count}/{total} track(s)![/]\n[white]Saved to:[/] [cyan]{dest_folder}[/]",
+            border_style="#00e676",
+            box=box.ROUNDED,
+            title="[bold #00e676]✨ Apple Music Download Complete[/]"
+        )
+        console.print(done_card)
+        send_notification("Apple Music Download Complete", f"Saved {success_count} track(s) to {dest_folder.name}", "audio-x-generic", config)
+        return 0
+    else:
+        console.print("[bold red]Failed to download tracks from Apple Music collection.[/bold red]")
+        return 1
+
 # ---------- Visual Components ----------
 def render_banner(config):
     console.clear()
@@ -468,7 +786,7 @@ def render_banner(config):
         Align.center(styled_banner),
         border_style="#4facfe",
         box=box.ROUNDED,
-        subtitle="[bold #e056fd]⚡ Next-Gen Media Downloader (YouTube, Spotify, etc.)[/]",
+        subtitle="[bold #e056fd]⚡ Next-Gen Media Downloader (Spotify, Apple Music, YouTube, SoundCloud)[/]",
         subtitle_align="right"
     )
     console.print(panel)
@@ -492,11 +810,12 @@ def show_clipboard_banner(clip_url):
     if not clip_url:
         return
     text = Text()
-    is_spot = is_spotify_url(clip_url)
-    icon = "🟢 " if is_spot else "🔗 "
-    prefix = "[Spotify Media] " if is_spot else ""
-    text.append(icon, style="bold #00f2fe")
-    text.append(prefix, style="bold #1db954" if is_spot else "bold #00f2fe")
+    plat = detect_platform(clip_url)
+    pmeta = PLATFORM_META.get(plat, PLATFORM_META["generic"])
+    icon = pmeta["icon"] + " "
+    prefix = f"[{pmeta['name']}] "
+    text.append(icon, style=f"bold {pmeta['color']}")
+    text.append(prefix, style=f"bold {pmeta['color']}")
     text.append(clip_url, style="bold white underline")
     text.append("\n💡 Press ", style="dim")
     text.append("[c]", style="bold #00f2fe")
@@ -505,7 +824,7 @@ def show_clipboard_banner(clip_url):
     clip_panel = Panel(
         text,
         title="[bold #00f2fe]📋 Clipboard Media URL Detected[/bold #00f2fe]",
-        border_style="#1db954" if is_spot else "#00f2fe",
+        border_style=pmeta["color"],
         box=box.ROUNDED,
         padding=(0, 2)
     )
@@ -515,7 +834,9 @@ def show_clipboard_banner(clip_url):
 def prompt_url_smart(prompt_label="media URL"):
     clip_url = get_clipboard_url()
     if clip_url:
-        console.print(f"  [dim]Detected URL in clipboard:[/] [bold cyan]{clip_url}[/]")
+        plat = detect_platform(clip_url)
+        pmeta = PLATFORM_META.get(plat, PLATFORM_META["generic"])
+        console.print(f"  [dim]Detected {pmeta['icon']} {pmeta['name']} in clipboard:[/] [bold cyan]{clip_url}[/]")
         use_clip = Confirm.ask("  Use this URL?", default=True)
         if use_clip:
             return clip_url
@@ -524,6 +845,11 @@ def prompt_url_smart(prompt_label="media URL"):
 
 def build_base_ytdlp_args(config):
     args = ["--no-mtime", "--continue"]
+    # Provide JS runtime if available (node, deno, bun) to prevent YouTube extraction warnings
+    for rt in ["node", "deno", "bun"]:
+        if shutil.which(rt):
+            args.extend(["--js-runtimes", rt])
+            break
     if config.get("embed_metadata", True):
         args.extend(["--add-metadata", "--embed-metadata"])
     if config.get("embed_thumbnail", True):
@@ -539,13 +865,24 @@ def download_audio(url, fmt=None, out_dir=None, config=None):
 
     if is_spotify_url(url):
         return download_spotify(url, fmt=fmt, out_dir=out_dir, config=config)
+    if is_apple_music_url(url):
+        return download_apple_music(url, fmt=fmt, out_dir=out_dir, config=config)
 
     fmt = fmt or config.get("default_audio_fmt", "mp3")
-    out_dir = Path(out_dir or config.get("audio_dir", Path.home() / "Music" / "easydl"))
-    out_dir.mkdir(parents=True, exist_ok=True)
+    base_out = Path(out_dir or config.get("audio_dir", Path.home() / "Music" / "easydl"))
+    base_out.mkdir(parents=True, exist_ok=True)
+
+    plat = detect_platform(url)
+    pmeta = PLATFORM_META.get(plat, PLATFORM_META["generic"])
+    if plat in ["ytmusic", "soundcloud", "bandcamp", "youtube"]:
+        console.print(Panel(f"[bold {pmeta['color']}]{pmeta['name']} Media[/]\n[white]{url}[/]", title=f"[bold {pmeta['color']}]{pmeta['icon']} {pmeta['name']} Detected[/]", box=box.ROUNDED, border_style=pmeta['color']))
 
     console.print(f"\n[bold #00f2fe]➜ Initiating audio download ({fmt.upper()}, best quality)...[/]")
-    console.print(f"[dim]Destination: {out_dir}[/dim]\n")
+    console.print(f"[dim]Destination: {base_out}[/dim]")
+    console.print("[dim]Playlists/Albums will automatically create dedicated folders.[/dim]\n")
+
+    # Conditional template creates a dedicated folder for playlists
+    out_template = str(base_out / "%(playlist_title&{}/|)s%(playlist_index&{:02d} - |)s%(title)s.%(ext)s")
 
     cmd = ["yt-dlp"]
     cmd.extend(build_base_ytdlp_args(config))
@@ -554,20 +891,20 @@ def download_audio(url, fmt=None, out_dir=None, config=None):
         "--extract-audio",
         "--audio-format", fmt,
         "--audio-quality", "0",
-        "-o", str(out_dir / "%(title)s.%(ext)s"),
+        "-o", out_template,
         url
     ])
 
     ret = subprocess.run(cmd)
     if ret.returncode == 0:
         card = Panel(
-            f"[bold #00e676]✔ Download Succeeded![/]\n[white]Saved to:[/] [cyan]{out_dir}[/]",
+            f"[bold #00e676]✔ Download Succeeded![/]\n[white]Saved to:[/] [cyan]{base_out}[/]",
             border_style="#00e676",
             box=box.ROUNDED,
             title="[bold #00e676]✨ Audio Download Complete[/]"
         )
         console.print(card)
-        send_notification("Audio Download Complete", f"Saved to {out_dir}", "audio-x-generic", config)
+        send_notification("Audio Download Complete", f"Saved to {base_out}", "audio-x-generic", config)
     else:
         console.print(f"\n[bold #ff1744]✘ Download failed. Please check the URL and internet connection.[/]")
         send_notification("Download Failed", f"Failed: {url}", "dialog-error", config)
@@ -580,6 +917,9 @@ def download_video(url, res=None, out_dir=None, config=None):
     if is_spotify_url(url):
         console.print("[yellow]Spotify links are audio-only. Switching to audio extraction...[/yellow]")
         return download_spotify(url, out_dir=config["audio_dir"], config=config)
+    if is_apple_music_url(url):
+        console.print("[yellow]Apple Music links are audio-only. Switching to audio extraction...[/yellow]")
+        return download_apple_music(url, out_dir=config["audio_dir"], config=config)
 
     res = res or config.get("default_video_res", "1080")
     out_dir = Path(out_dir or config.get("video_dir", Path.home() / "Videos" / "easydl"))
@@ -599,10 +939,12 @@ def download_video(url, res=None, out_dir=None, config=None):
     if config.get("embed_subs", False):
         cmd.extend(["--write-subs", "--sub-langs", "en.*,ja,all", "--embed-subs"])
 
+    out_template = str(out_dir / "%(playlist_title&{}/|)s%(playlist_index&{:02d} - |)s%(title)s.%(ext)s")
+
     cmd.extend([
         "-f", fmt_string,
         "--merge-output-format", "mp4",
-        "-o", str(out_dir / "%(title)s.%(ext)s"),
+        "-o", out_template,
         url
     ])
 
@@ -627,12 +969,22 @@ def sync_playlist(url, folder_name=None, media_type="audio", config=None):
 
     if is_spotify_url(url):
         return download_spotify(url, out_dir=config["audio_dir"], config=config)
+    if is_apple_music_url(url):
+        return download_apple_music(url, out_dir=config["audio_dir"], config=config)
 
     base_dir = Path(config["video_dir"]) if media_type == "video" else Path(config["audio_dir"])
-    folder_name = folder_name or "playlist"
-    sync_dir = base_dir / folder_name
-    archive_file = sync_dir / ".easydl-archive.txt"
-    sync_dir.mkdir(parents=True, exist_ok=True)
+    
+    if folder_name:
+        safe_folder = sanitize_folder_name(folder_name)
+        sync_dir = base_dir / safe_folder
+        sync_dir.mkdir(parents=True, exist_ok=True)
+        archive_file = sync_dir / ".easydl-archive.txt"
+        out_template = str(sync_dir / "%(playlist_index)02d - %(title)s.%(ext)s")
+    else:
+        sync_dir = base_dir
+        archive_file = base_dir / ".easydl-archive.txt"
+        # Organizes into playlist folder automatically
+        out_template = str(base_dir / "%(playlist_title&{}/|)s%(playlist_index&{:02d} - |)s%(title)s.%(ext)s")
 
     console.print(f"\n[bold #00f2fe]➜ Syncing playlist into:[/] [cyan]{sync_dir}[/]")
     console.print(f"[dim]Archive Tracker: {archive_file} (skips tracks already present)[/dim]\n")
@@ -648,7 +1000,7 @@ def sync_playlist(url, folder_name=None, media_type="audio", config=None):
             "--merge-output-format", "mp4",
             "--download-archive", str(archive_file),
             "--yes-playlist",
-            "-o", str(sync_dir / "%(playlist_index)02d - %(title)s.%(ext)s"),
+            "-o", out_template,
             url
         ])
     else:
@@ -660,7 +1012,7 @@ def sync_playlist(url, folder_name=None, media_type="audio", config=None):
             "--audio-quality", "0",
             "--download-archive", str(archive_file),
             "--yes-playlist",
-            "-o", str(sync_dir / "%(playlist_index)02d - %(title)s.%(ext)s"),
+            "-o", out_template,
             url
         ])
 
@@ -673,7 +1025,7 @@ def sync_playlist(url, folder_name=None, media_type="audio", config=None):
             title="[bold #00e676]✨ Playlist Synced[/]"
         )
         console.print(card)
-        send_notification("Playlist Synced", f"Synced to {folder_name}", "media-playlist", config)
+        send_notification("Playlist Synced", f"Synced to {sync_dir.name}", "media-playlist", config)
     else:
         console.print(f"\n[bold #ff1744]✘ Playlist sync encountered errors.[/]")
     return ret.returncode
@@ -738,13 +1090,19 @@ def do_search(config):
 # ---------- Interactive Menus ----------
 def menu_audio(config):
     render_banner(config)
-    console.print("  [bold #00f2fe]🎵 Download Audio Track / Spotify[/]\n")
-    url = prompt_url_smart("audio or Spotify URL")
+    console.print("  [bold #00f2fe]🎵 Download Audio / Music[/]")
+    console.print("  [dim]Supports Spotify, Apple Music, YouTube Music, SoundCloud, Bandcamp, YouTube[/dim]\n")
+    url = prompt_url_smart("audio, song, album, or playlist URL")
     if not url:
         return
 
     if is_spotify_url(url):
         download_spotify(url, config=config)
+        input("\nPress Enter to return...")
+        return
+
+    if is_apple_music_url(url):
+        download_apple_music(url, config=config)
         input("\nPress Enter to return...")
         return
 
@@ -773,6 +1131,11 @@ def menu_video(config):
 
     if is_spotify_url(url):
         download_spotify(url, config=config)
+        input("\nPress Enter to return...")
+        return
+
+    if is_apple_music_url(url):
+        download_apple_music(url, config=config)
         input("\nPress Enter to return...")
         return
 
@@ -805,9 +1168,9 @@ def menu_video(config):
 
 def menu_playlist(config):
     render_banner(config)
-    console.print("  [bold #00f2fe]🔁 Sync Playlist or Spotify Album[/]")
-    console.print("  [dim]Smart incremental download: safely skips previously fetched tracks.[/dim]\n")
-    url = prompt_url_smart("playlist or Spotify album URL")
+    console.print("  [bold #00f2fe]🔁 Sync Playlist or Album (Auto-Folder)[/]")
+    console.print("  [dim]Smart incremental download: creates dedicated folder & skips already fetched tracks.[/dim]\n")
+    url = prompt_url_smart("playlist or album URL (Spotify, Apple Music, YT Music, SoundCloud, YouTube)")
     if not url:
         return
 
@@ -816,14 +1179,14 @@ def menu_playlist(config):
         input("\nPress Enter to return...")
         return
 
-    folder = Prompt.ask("  Enter folder name for this playlist (e.g. 'anime-ost')")
-    if not folder:
-        console.print("[red]Folder name required.[/red]")
+    if is_apple_music_url(url):
+        download_apple_music(url, config=config)
         input("\nPress Enter to return...")
         return
 
+    folder = Prompt.ask("  Enter folder name (press Enter to auto-name from playlist title)", default="")
     media_type = Prompt.ask("  Playlist Media Type", choices=["audio", "video"], default="audio")
-    sync_playlist(url, folder, media_type=media_type, config=config)
+    sync_playlist(url, folder or None, media_type=media_type, config=config)
     input("\nPress Enter to return...")
 
 def menu_clipboard_direct(config):
@@ -839,7 +1202,14 @@ def menu_clipboard_direct(config):
         input("\nPress Enter to return...")
         return
 
-    console.print(Panel(f"[bold cyan]{clip_url}[/]", title="[bold #00f2fe]📋 Clipboard Ready[/]", box=box.ROUNDED))
+    if is_apple_music_url(clip_url):
+        download_apple_music(clip_url, config=config)
+        input("\nPress Enter to return...")
+        return
+
+    plat = detect_platform(clip_url)
+    pmeta = PLATFORM_META.get(plat, PLATFORM_META["generic"])
+    console.print(Panel(f"[bold cyan]{clip_url}[/]", title=f"[bold {pmeta['color']}]{pmeta['icon']} {pmeta['name']} Detected[/]", box=box.ROUNDED, border_style=pmeta["color"]))
     table = Table(box=box.ROUNDED, border_style="#4facfe", show_header=False)
     table.add_column("Key", style="bold cyan", width=4)
     table.add_column("Action", style="bold white")
@@ -952,9 +1322,9 @@ def main_menu():
         table.add_column("Action", style="bold white", width=25)
         table.add_column("Description", style="grey78")
 
-        table.add_row("1", "🎵  Download Audio", "YouTube, Spotify, SoundCloud (MP3, FLAC, OPUS)")
+        table.add_row("1", "🎵  Download Audio", "Spotify, Apple Music, YouTube Music, SoundCloud")
         table.add_row("2", "🎬  Download Video", "4K, 1440p, 1080p, 720p, or Best available")
-        table.add_row("3", "🔁  Sync Playlist / Album", "Incremental sync: YouTube & Spotify Albums")
+        table.add_row("3", "🔁  Sync Playlist / Album", "Auto-folders: Spotify, Apple Music, YT Music, SoundCloud")
         table.add_row("4", "📋  From Clipboard", "Instantly fetch media from copied URL")
         table.add_row("5", "🔍  Media Library (fzf)", "Fuzzy search & instantly play downloaded media")
         table.add_row("6", "📂  Open Folders", "Open Music or Video folder in file manager")
@@ -993,10 +1363,13 @@ def cli_help():
 [bold white]USAGE:[/]
   easydl                                    Start interactive visual menu
   easydl [URL]                              Smart download prompt for URL
-  easydl audio [OPTIONS] <URL>              Download audio track / Spotify directly
+  easydl audio [OPTIONS] <URL>              Download audio (Spotify, Apple Music, YT Music, SoundCloud)
   easydl video [OPTIONS] <URL>              Download video directly
-  easydl sync [OPTIONS] <URL> [FOLDER]      Sync a playlist or Spotify album
-  easydl spotify <URL>                      Direct download Spotify track/album/playlist
+  easydl sync [OPTIONS] <URL> [FOLDER]      Sync playlist / album with auto-folder creation
+  easydl spotify <URL>                      Download Spotify track/album/playlist into organized folder
+  easydl apple <URL>                        Download Apple Music song/album/playlist into organized folder
+  easydl ytmusic <URL>                      Download YouTube Music track/album/playlist
+  easydl soundcloud <URL>                   Download SoundCloud track/set
   easydl clipboard                          Download whatever is in clipboard
   easydl search                             Fuzzy find & play downloaded files (fzf)
   easydl open [audio|video]                 Open downloads directory in file manager
@@ -1004,9 +1377,13 @@ def cli_help():
   easydl config                             Print current configuration
 
 [bold white]COMMAND ALIASES:[/]
-  a, audio <url>                            Download audio
+  a, audio <url>                            Download audio (all music platforms)
   v, video <url>                            Download video
-  s, sync, playlist <url> [folder]          Sync playlist / album
+  s, sync, playlist <url> [folder]          Sync playlist / album into folder
+  am, apple, applemusic <url>               Apple Music downloader
+  sp, spotify <url>                         Spotify downloader
+  ytm, ytmusic <url>                        YouTube Music downloader
+  sc, soundcloud <url>                      SoundCloud downloader
   c, clip, clipboard                        Process URL in clipboard
   f, search                                 Launch library search
 
@@ -1021,11 +1398,13 @@ def cli_help():
   -V, --version                             Show version info
 
 [bold white]EXAMPLES:[/]
-  easydl "https://youtu.be/..."
-  easydl "https://open.spotify.com/album/46SYTfUIAxc65t2TFZp1fk"
+  easydl "https://open.spotify.com/playlist/37i9dQZF1DZ06evO1duNex"
+  easydl "https://music.apple.com/us/playlist/todays-hits/pl.f4d106fed2bd41149aaacabb233eb5eb"
+  easydl "https://music.youtube.com/playlist?list=..."
+  easydl "https://soundcloud.com/octobersveryown/sets/..."
   easydl audio -f flac "https://youtu.be/..."
   easydl video -q 1080 "https://youtu.be/..."
-  easydl sync "https://youtube.com/playlist?list=..." my-fav-songs
+  easydl sync "https://youtube.com/playlist?list=..."
   easydl clipboard""",
         title=f"[bold #00f2fe]easydl v{VERSION}[/]",
         border_style="#4facfe",
@@ -1083,6 +1462,18 @@ def run_cli():
         target_url = rest[0] if rest else prompt_url_smart("Spotify URL")
         sys.exit(download_spotify(target_url, config=config))
 
+    if cmd in ["apple", "applemusic", "am"]:
+        target_url = rest[0] if rest else prompt_url_smart("Apple Music URL")
+        sys.exit(download_apple_music(target_url, config=config))
+
+    if cmd in ["ytmusic", "ytm", "youtube-music"]:
+        target_url = rest[0] if rest else prompt_url_smart("YouTube Music URL")
+        sys.exit(download_audio(target_url, config=config))
+
+    if cmd in ["soundcloud", "sc"]:
+        target_url = rest[0] if rest else prompt_url_smart("SoundCloud URL")
+        sys.exit(download_audio(target_url, config=config))
+
     if cmd in ["a", "audio"]:
         fmt = config["default_audio_fmt"]
         out = config["audio_dir"]
@@ -1111,6 +1502,8 @@ def run_cli():
             url = prompt_url_smart("audio URL")
         if is_spotify_url(url):
             sys.exit(download_spotify(url, fmt=fmt, out_dir=out, config=config))
+        if is_apple_music_url(url):
+            sys.exit(download_apple_music(url, fmt=fmt, out_dir=out, config=config))
         sys.exit(download_audio(url, fmt=fmt, out_dir=out, config=config))
 
     if cmd in ["v", "video"]:
@@ -1144,6 +1537,8 @@ def run_cli():
             url = prompt_url_smart("video URL")
         if is_spotify_url(url):
             sys.exit(download_spotify(url, out_dir=config["audio_dir"], config=config))
+        if is_apple_music_url(url):
+            sys.exit(download_apple_music(url, out_dir=config["audio_dir"], config=config))
         sys.exit(download_video(url, res=res, out_dir=out, config=config))
 
     if cmd in ["s", "sync", "playlist"]:
@@ -1161,17 +1556,21 @@ def run_cli():
             url = prompt_url_smart("playlist or album URL")
         if is_spotify_url(url):
             sys.exit(download_spotify(url, out_dir=config["audio_dir"], config=config))
-        if not folder:
-            folder = Prompt.ask("Enter folder name for playlist")
+        if is_apple_music_url(url):
+            sys.exit(download_apple_music(url, out_dir=config["audio_dir"], config=config))
         sys.exit(sync_playlist(url, folder, media_type=media_type, config=config))
 
     if cmd.startswith("http://") or cmd.startswith("https://") or cmd.startswith("spotify:"):
         raw_url = cmd
         if is_spotify_url(raw_url):
             sys.exit(download_spotify(raw_url, config=config))
+        if is_apple_music_url(raw_url):
+            sys.exit(download_apple_music(raw_url, config=config))
 
         render_banner(config)
-        console.print(Panel(f"[bold cyan]{raw_url}[/]", title="[bold #00f2fe]URL Provided[/]", box=box.ROUNDED))
+        plat = detect_platform(raw_url)
+        pmeta = PLATFORM_META.get(plat, PLATFORM_META["generic"])
+        console.print(Panel(f"[bold cyan]{raw_url}[/]", title=f"[bold {pmeta['color']}]{pmeta['icon']} {pmeta['name']} URL Provided[/]", box=box.ROUNDED, border_style=pmeta["color"]))
         table = Table(box=box.ROUNDED, border_style="#4facfe", show_header=False)
         table.add_column("Key", style="bold cyan", width=4)
         table.add_column("Action", style="bold white")
@@ -1188,8 +1587,8 @@ def run_cli():
         elif ch == "3":
             sys.exit(download_video(raw_url, res="best", config=config))
         elif ch == "4":
-            f_name = Prompt.ask("Folder name", default="playlist")
-            sys.exit(sync_playlist(raw_url, f_name, config=config))
+            f_name = Prompt.ask("Folder name (press Enter for auto-named folder)", default="")
+            sys.exit(sync_playlist(raw_url, f_name or None, config=config))
 
     console.print(f"[bold red]Unknown command: {cmd}[/]")
     console.print("Run [bold cyan]easydl --help[/] for usage instructions.")
