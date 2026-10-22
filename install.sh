@@ -57,8 +57,8 @@ install_ffmpeg() {
 install_ffmpeg
 
 # 3. Install Python dependencies
-echo -e "\n${CYAN}➜ Installing Python dependencies (rich, yt-dlp)...${RESET}"
-python3 -m pip install --upgrade --user rich yt-dlp
+echo -e "\n${CYAN}➜ Installing Python dependencies (rich, yt-dlp, spotdl)...${RESET}"
+python3 -m pip install --upgrade --user rich yt-dlp spotdl
 
 # 4. Install easydl executable
 echo -e "\n${CYAN}➜ Installing easydl...${RESET}"

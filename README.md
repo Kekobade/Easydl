@@ -11,14 +11,14 @@
 
 <p align="center">
   <b>A friendly, high-performance, cross-platform media downloader & library manager.</b><br>
-  <i>Powered by <code>yt-dlp</code>, <code>ffmpeg</code>, and <code>rich</code>.</i>
+  <i>Powered by <code>yt-dlp</code>, <code>spotdl</code>, <code>ffmpeg</code>, and <code>rich</code>.</i>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.8+-00f2fe?style=for-the-badge&logo=python&logoColor=black" alt="Python 3.8+" />
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-4facfe?style=for-the-badge" alt="Platforms" />
   <img src="https://img.shields.io/badge/license-MIT-a8ff78?style=for-the-badge&logoColor=black" alt="MIT License" />
-  <img src="https://img.shields.io/badge/powered%20by-yt--dlp-ffd200?style=for-the-badge&logoColor=black" alt="yt-dlp" />
+  <img src="https://img.shields.io/badge/powered%20by-yt--dlp%20%26%20spotdl-ffd200?style=for-the-badge&logoColor=black" alt="yt-dlp & spotdl" />
 </p>
 
 ---
@@ -28,7 +28,7 @@
 - 🎨 **Sleek Interactive TUI**: Beautiful modern visual interface powered by Rich with dynamic gradient banners and live badges.
 - 🎵 **Multi-Platform Music Suite**: First-class support for **Spotify**, **Apple Music**, **YouTube Music**, and **SoundCloud**.
 - 📁 **Automated Playlist & Album Folders**: Downloading any playlist or album (from Spotify, Apple Music, YouTube Music, SoundCloud, or YouTube) automatically creates a clean, dedicated subfolder named after the playlist!
-- 🟢 **Fixed & Enhanced Spotify Support**: Robust metadata extraction with automatic typo recovery (resolves `0` vs `O` errors) and strict verification so you never get mismatched songs.
+- 🟢 **Dedicated Spotify Client (`spotdl`)**: Powered by `spotdl` for exact audio matching, audio fingerprinting, duration verification, high-res album covers, and full ID3 metadata tagging—preventing mismatched or random videos.
 - 🍎 **Native Apple Music Support**: Download songs, albums, and curated playlists directly from Apple Music links with full tag preservation.
 - 🔴 **YouTube Music & 🟠 SoundCloud**: Full native extraction of tracks, playlists, sets, and albums.
 - 🎶 **Audiophile-Grade Formats**: One-click extraction to MP3 (320kbps), bit-perfect FLAC, OPUS, M4A, or uncompressed WAV with embedded album artwork and metadata tags.
@@ -45,7 +45,7 @@
 Before installing `easydl`, ensure you have:
 1. **Python 3.8 or newer**
 2. **ffmpeg** (required for audio conversion and video stream muxing)
-3. **yt-dlp** (installed automatically by the package)
+3. **yt-dlp** & **spotdl** (installed automatically by the package)
 4. *(Optional)* **fzf** for instant interactive fuzzy media search
 
 ---
@@ -59,7 +59,7 @@ Choose your operating system below for 1-click or quick installation instruction
 #### Automated 1-Click Install:
 Clone this repository and run the installer:
 ```bash
-git clone https://github.com/kekobade/easydl.git
+git clone https://github.com/your-username/easydl.git
 cd easydl
 chmod +x install.sh
 ./install.sh
@@ -83,7 +83,7 @@ chmod +x install.sh
 
 #### Automated 1-Click Install:
 ```bash
-git clone https://github.com/kekobade/easydl.git
+git clone https://github.com/your-username/easydl.git
 cd easydl
 chmod +x install.sh
 ./install.sh
@@ -201,7 +201,7 @@ You can adjust these settings directly inside `easydl` by pressing **`7`** (**Se
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-Feel free to check the [issues page](https://github.com/kekobade/easydl/issues).
+Feel free to check the [issues page](https://github.com/your-username/easydl/issues).
 
 ---
 

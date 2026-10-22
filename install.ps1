@@ -29,9 +29,9 @@ if (-not $ffmpegCmd) {
 }
 
 # 3. Install Python dependencies
-Write-Host "`n[INFO] Installing Python packages (rich, yt-dlp)..." -ForegroundColor Cyan
+Write-Host "`n[INFO] Installing Python packages (rich, yt-dlp, spotdl)..." -ForegroundColor Cyan
 python -m pip install --upgrade pip
-python -m pip install --upgrade rich yt-dlp
+python -m pip install --upgrade rich yt-dlp spotdl
 python -m pip install -e "$PSScriptRoot"
 
 Write-Host "`n======================================================" -ForegroundColor Green

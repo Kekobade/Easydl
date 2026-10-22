@@ -35,9 +35,9 @@ if %errorlevel% neq 0 (
 
 :: 3. Install Python requirements
 echo.
-echo [INFO] Installing required Python libraries (rich, yt-dlp)...
+echo [INFO] Installing required Python libraries (rich, yt-dlp, spotdl)...
 python -m pip install --upgrade pip
-python -m pip install --upgrade rich yt-dlp
+python -m pip install --upgrade rich yt-dlp spotdl
 python -m pip install -e "%~dp0"
 
 echo.

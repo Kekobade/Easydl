@@ -36,7 +36,7 @@ except ImportError:
     print("Error: 'rich' library is required. Install with: pip install rich")
     sys.exit(1)
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 # ---------- Cross-Platform Paths ----------
 def get_config_dir():
@@ -65,6 +65,7 @@ DEFAULT_CONFIG = {
     "embed_thumbnail": True,
     "embed_subs": False,
     "browser_cookies": "",
+    "spotify_client": "spotdl",
 }
 
 def load_config():
@@ -97,8 +98,43 @@ def save_config(config):
             f.write(f'EMBED_THUMBNAIL="{"true" if config.get("embed_thumbnail") else "false"}"\n')
             f.write(f'EMBED_SUBS="{"true" if config.get("embed_subs") else "false"}"\n')
             f.write(f'BROWSER_COOKIES="{config.get("browser_cookies", "")}"\n')
+            f.write(f'SPOTIFY_CLIENT="{config.get("spotify_client", "spotdl")}"\n')
     except Exception as e:
         console.print(f"[red]Failed to save config: {e}[/red]")
+
+def get_spotdl_cmd():
+    """Return command list for spotdl, or None if not found."""
+    if shutil.which("spotdl"):
+        return ["spotdl"]
+    local_spotdl = Path.home() / ".local" / "bin" / "spotdl"
+    if local_spotdl.is_file() and os.access(local_spotdl, os.X_OK):
+        return [str(local_spotdl)]
+    try:
+        res = subprocess.run([sys.executable, "-m", "spotdl", "--version"], capture_output=True, text=True, timeout=3)
+        if res.returncode == 0:
+            return [sys.executable, "-m", "spotdl"]
+    except Exception:
+        pass
+    return None
+
+def ensure_spotdl(config=None):
+    """Ensure spotdl is installed; prompt user or install if missing."""
+    cmd = get_spotdl_cmd()
+    if cmd:
+        return cmd
+
+    console.print("\n[bold yellow]⚠️ 'spotdl' is required for high-accuracy Spotify downloads.[/bold yellow]")
+    console.print("[dim]spotdl provides audio fingerprinting, duration matching, album art, and accurate ID3 tags.[/dim]")
+
+    if Confirm.ask("  Would you like to install spotdl now via pip?", default=True):
+        console.print("[dim]Installing spotdl...[/dim]")
+        install_res = subprocess.run([sys.executable, "-m", "pip", "install", "--user", "-U", "spotdl"])
+        if install_res.returncode == 0:
+            cmd = get_spotdl_cmd()
+            if cmd:
+                console.print("[bold green]✔ spotdl successfully installed![/bold green]\n")
+                return cmd
+    return None
 
 # ---------- Cross-Platform System Helpers ----------
 def open_path(p):
@@ -434,13 +470,98 @@ def parse_spotify(url):
         "tracks": tracks
     }, None
 
-def download_spotify(url, fmt=None, out_dir=None, config=None):
+def download_spotify_spotdl(url, fmt=None, out_dir=None, folder_name=None, config=None, meta=None):
+    """Dedicated Spotify downloader client powered by spotdl."""
+    if not config:
+        config = load_config()
+    fmt = fmt or config.get("default_audio_fmt", "mp3")
+    base_out = Path(out_dir or config.get("audio_dir", Path.home() / "Music" / "easydl"))
+    base_out.mkdir(parents=True, exist_ok=True)
+
+    spotdl_bin = get_spotdl_cmd()
+    if not spotdl_bin:
+        spotdl_bin = ensure_spotdl(config)
+        if not spotdl_bin:
+            console.print("[yellow]Falling back to yt-dlp search engine...[/yellow]")
+            return download_spotify_ytdlp(url, fmt=fmt, out_dir=out_dir, folder_name=folder_name, config=config, meta=meta)
+
+    is_track = bool(re.search(r"/(track)/|spotify:track:", str(url)))
+
+    # Determine destination folder
+    if folder_name:
+        dest_folder = base_out / sanitize_folder_name(folder_name)
+    elif meta and not is_track:
+        dest_folder = base_out / sanitize_folder_name(meta["title"])
+    elif not is_track:
+        dest_folder = base_out
+    else:
+        dest_folder = base_out
+
+    dest_folder.mkdir(parents=True, exist_ok=True)
+
+    # spotdl supported formats: mp3, flac, ogg, opus, m4a, wav
+    spotdl_fmt = fmt.lower() if fmt.lower() in ["mp3", "flac", "ogg", "opus", "m4a", "wav"] else "mp3"
+
+    if dest_folder != base_out:
+        out_template = str(dest_folder / "{artists} - {title}.{output-ext}")
+    elif is_track:
+        out_template = str(base_out / "{artists} - {title}.{output-ext}")
+    else:
+        out_template = str(base_out / "{list-name}" / "{artists} - {title}.{output-ext}")
+
+    cmd = list(spotdl_bin)
+    cmd.extend([
+        "download",
+        url,
+        "--format", spotdl_fmt,
+        "--output", out_template,
+        "--audio", "youtube-music", "youtube", "soundcloud",
+        "--overwrite", "skip",
+    ])
+
+    # Pass JS runtime if node/deno/bun exists to prevent YouTube extraction errors
+    for rt in ["node", "deno", "bun"]:
+        if shutil.which(rt):
+            cmd.extend(["--yt-dlp-args", f"--js-runtimes {rt}"])
+            break
+
+    # If browser cookies are configured
+    if config.get("browser_cookies"):
+        cmd.extend(["--cookie-file", config["browser_cookies"]])
+
+    console.print(f"\n[bold #00f2fe]➜ Launching dedicated spotdl client for Spotify...[/]")
+    console.print(f"[dim]Destination: {dest_folder}[/dim]")
+    console.print(f"[dim]Output Template: {out_template}[/dim]\n")
+
+    ret = subprocess.run(cmd)
+
+    if ret.returncode == 0:
+        done_card = Panel(
+            f"[bold #00e676]✔ Spotify Download Succeeded![/]\n[white]Saved to:[/] [cyan]{dest_folder}[/]",
+            border_style="#00e676",
+            box=box.ROUNDED,
+            title="[bold #00e676]✨ Spotify Download Complete[/]"
+        )
+        console.print(done_card)
+        send_notification("Spotify Download Complete", f"Downloaded tracks to {dest_folder.name}", "audio-x-generic", config)
+        return 0
+    else:
+        console.print(f"\n[bold #ff1744]✘ spotdl exited with code {ret.returncode}.[/]")
+        send_notification("Spotify Download Failed", f"Failed: {url}", "dialog-error", config)
+        return ret.returncode
+
+def download_spotify_ytdlp(url, fmt=None, out_dir=None, folder_name=None, config=None, meta=None):
+    """Fallback Spotify downloader using metadata scraping + yt-dlp search."""
     if not config:
         config = load_config()
     fmt = fmt or config.get("default_audio_fmt", "mp3")
     base_out = Path(out_dir or config.get("audio_dir", Path.home() / "Music" / "easydl"))
 
-    meta, err = parse_spotify(url)
+    if not meta:
+        meta, err = parse_spotify(url)
+    else:
+        err = None
+
     if not meta or not meta.get("tracks"):
         console.print(f"[bold red]Could not retrieve Spotify track details: {err or 'Unknown error'}[/bold red]")
         return 1
@@ -448,17 +569,10 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
     tracks = meta["tracks"]
     total = len(tracks)
 
-    info_card = Panel(
-        f"[bold #1db954]Spotify {meta['type'].upper()}:[/] [bold white]{meta['title']}[/]\n"
-        f"[dim]Artist:[/] [cyan]{meta['artist'] or 'Various'}[/]  │  [dim]Total Tracks:[/] [yellow]{total}[/]",
-        border_style="#1db954",
-        box=box.ROUNDED,
-        title="[bold #1db954]🟢 Spotify Media Detected[/]"
-    )
-    console.print(info_card)
-
     dest_folder = base_out
-    if meta["type"] in ["album", "playlist"] or total > 1:
+    if folder_name:
+        dest_folder = base_out / sanitize_folder_name(folder_name)
+    elif meta["type"] in ["album", "playlist"] or total > 1:
         safe_name = sanitize_folder_name(meta["title"])
         dest_folder = base_out / safe_name
         console.print(f"  [dim]📁 Dedicated folder:[/] [bold cyan]{dest_folder}[/]")
@@ -524,6 +638,30 @@ def download_spotify(url, fmt=None, out_dir=None, config=None):
     else:
         console.print("[bold red]Failed to download tracks from Spotify collection.[/bold red]")
         return 1
+
+def download_spotify(url, fmt=None, out_dir=None, folder_name=None, config=None):
+    """High-level Spotify dispatcher with rich preview and dedicated spotdl client engine."""
+    if not config:
+        config = load_config()
+
+    meta, _ = parse_spotify(url)
+    if meta:
+        total = len(meta.get("tracks", []))
+        engine_label = "spotdl (Dedicated Client)" if config.get("spotify_client", "spotdl") == "spotdl" else "yt-dlp (Legacy Fallback)"
+        info_card = Panel(
+            f"[bold #1db954]Spotify {meta['type'].upper()}:[/] [bold white]{meta['title']}[/]\n"
+            f"[dim]Artist:[/] [cyan]{meta['artist'] or 'Various'}[/]  │  [dim]Total Tracks:[/] [yellow]{total}[/]  │  [dim]Client:[/] [bold #1db954]{engine_label}[/]",
+            border_style="#1db954",
+            box=box.ROUNDED,
+            title="[bold #1db954]🟢 Spotify Media Detected[/]"
+        )
+        console.print(info_card)
+
+    client_pref = config.get("spotify_client", "spotdl")
+    if client_pref == "spotdl":
+        return download_spotify_spotdl(url, fmt=fmt, out_dir=out_dir, folder_name=folder_name, config=config, meta=meta)
+    else:
+        return download_spotify_ytdlp(url, fmt=fmt, out_dir=out_dir, folder_name=folder_name, config=config, meta=meta)
 
 # ---------- Apple Music Support ----------
 def is_apple_music_url(url):
@@ -800,6 +938,8 @@ def render_banner(config):
     badges.append(" ")
     badges.append(f" 📦 yt-dlp: {ytdlp_ver} ", style="bold black on #4facfe")
     badges.append(" ")
+    badges.append(f" 🟢 Spotify: spotdl ", style="bold black on #1db954")
+    badges.append(" ")
     badges.append(f" 🎵 Music: {audio_cnt} ", style="bold black on #a8ff78")
     badges.append(" ")
     badges.append(f" 🎬 Videos: {video_cnt} ", style="bold black on #ffd200")
@@ -968,7 +1108,7 @@ def sync_playlist(url, folder_name=None, media_type="audio", config=None):
         config = load_config()
 
     if is_spotify_url(url):
-        return download_spotify(url, out_dir=config["audio_dir"], config=config)
+        return download_spotify(url, out_dir=config["audio_dir"], folder_name=folder_name, config=config)
     if is_apple_music_url(url):
         return download_apple_music(url, out_dir=config["audio_dir"], config=config)
 
@@ -1174,8 +1314,9 @@ def menu_playlist(config):
     if not url:
         return
 
+    folder = Prompt.ask("  Enter folder name (press Enter to auto-name from playlist title)", default="")
     if is_spotify_url(url):
-        download_spotify(url, config=config)
+        download_spotify(url, folder_name=folder or None, config=config)
         input("\nPress Enter to return...")
         return
 
@@ -1184,7 +1325,6 @@ def menu_playlist(config):
         input("\nPress Enter to return...")
         return
 
-    folder = Prompt.ask("  Enter folder name (press Enter to auto-name from playlist title)", default="")
     media_type = Prompt.ask("  Playlist Media Type", choices=["audio", "video"], default="audio")
     sync_playlist(url, folder or None, media_type=media_type, config=config)
     input("\nPress Enter to return...")
@@ -1243,6 +1383,7 @@ def menu_settings(config):
         notify_val = "[bold #00e676]ENABLED[/]" if config["notifications"] else "[dim]DISABLED[/]"
         subs_val = "[bold #00e676]ENABLED[/]" if config["embed_subs"] else "[dim]DISABLED[/]"
         cookies_val = f"[bold magenta]{config['browser_cookies']}[/]" if config["browser_cookies"] else "[dim]None[/]"
+        sp_client_val = f"[bold #1db954]{config.get('spotify_client', 'spotdl').upper()}[/]"
 
         table.add_row("1", "Desktop Notifications", notify_val, "System alerts upon download completion")
         table.add_row("2", "Default Audio Format", f"[cyan]{config['default_audio_fmt'].upper()}[/]", "Default format for quick audio downloads")
@@ -1251,10 +1392,11 @@ def menu_settings(config):
         table.add_row("5", "Browser Cookies", cookies_val, "Bypass age-restriction / login prompts")
         table.add_row("6", "Audio Directory", f"[blue]{config['audio_dir']}[/]", "Root folder for audio downloads")
         table.add_row("7", "Video Directory", f"[blue]{config['video_dir']}[/]", "Root folder for video downloads")
+        table.add_row("8", "Spotify Engine", sp_client_val, "Dedicated spotdl client (recommended) or yt-dlp fallback")
         table.add_row("b", "Back to Main Menu", "", "")
         console.print(table)
 
-        choice = Prompt.ask("  Select setting to change", choices=["1", "2", "3", "4", "5", "6", "7", "b"], default="b")
+        choice = Prompt.ask("  Select setting to change", choices=["1", "2", "3", "4", "5", "6", "7", "8", "b"], default="b")
         if choice == "1":
             config["notifications"] = not config["notifications"]
         elif choice == "2":
@@ -1271,6 +1413,8 @@ def menu_settings(config):
         elif choice == "7":
             new_path = Prompt.ask("Enter new Video path", default=config["video_dir"])
             config["video_dir"] = str(Path(new_path).expanduser().resolve())
+        elif choice == "8":
+            config["spotify_client"] = Prompt.ask("Choose Spotify engine", choices=["spotdl", "yt-dlp"], default="spotdl")
         elif choice.lower() == "b":
             break
 
@@ -1459,8 +1603,30 @@ def run_cli():
         return
 
     if cmd in ["spotify", "sp"]:
-        target_url = rest[0] if rest else prompt_url_smart("Spotify URL")
-        sys.exit(download_spotify(target_url, config=config))
+        fmt = config["default_audio_fmt"]
+        out = config["audio_dir"]
+        folder = None
+        target_url = None
+        i = 0
+        while i < len(rest):
+            arg = rest[i]
+            if arg in ["-f", "--format"] and i + 1 < len(rest):
+                fmt = rest[i+1]
+                i += 2
+            elif arg in ["-o", "--output"] and i + 1 < len(rest):
+                out = rest[i+1]
+                i += 2
+            elif arg in ["--folder", "-F"] and i + 1 < len(rest):
+                folder = rest[i+1]
+                i += 2
+            elif not arg.startswith("-"):
+                target_url = arg
+                i += 1
+            else:
+                i += 1
+        if not target_url:
+            target_url = prompt_url_smart("Spotify URL")
+        sys.exit(download_spotify(target_url, fmt=fmt, out_dir=out, folder_name=folder, config=config))
 
     if cmd in ["apple", "applemusic", "am"]:
         target_url = rest[0] if rest else prompt_url_smart("Apple Music URL")

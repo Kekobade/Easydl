@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easydl"
-version = "2.3.0"
-description = "A friendly, cross-platform media downloader & library manager powered by yt-dlp, rich, and ffmpeg."
+version = "2.4.0"
+description = "A friendly, cross-platform media downloader & library manager powered by yt-dlp, spotdl, rich, and ffmpeg."
 readme = "README.md"
 authors = [{ name = "easydl team" }]
 license = { text = "MIT" }
@@ -30,6 +30,7 @@ classifiers = [
 dependencies = [
     "rich>=13.0.0",
     "yt-dlp>=2024.0.0",
+    "spotdl>=4.2.0",
 ]
 
 [project.scripts]
