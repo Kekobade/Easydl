@@ -10,7 +10,7 @@
 ```
 
 <p align="center">
-  <b>A friendly, high-performance, cross-platform media downloader & library manager.</b><br>
+  <b>A friendly, Vibe-Coded, high-performance, cross-platform media downloader & library manager.</b><br>
   <i>Powered by <code>yt-dlp</code>, <code>spotdl</code>, <code>ffmpeg</code>, and <code>rich</code>.</i>
 </p>
 
